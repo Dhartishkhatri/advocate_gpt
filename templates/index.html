@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advocate GPT - Legal RAG Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #10a37f;
+            --secondary-color: #343541;
+            --tertiary-color: #ececf1;
+            --background-color: #fff;
+            --message-user-bg: #10a37f;
+            --message-assistant-bg: #f1f1f1;
+            --text-primary: #0d0d0d;
+            --text-secondary: #565869;
+            --border-color: #d1d5db;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            background-color: #fff;
+        }
+
+        .sidebar {
+            width: 260px;
+            background-color: var(--secondary-color);
+            padding: 16px;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            color: white;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .sidebar-header h1 {
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .new-chat-btn {
+            background-color: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.2s;
+        }
+
+        .new-chat-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .conversation-history {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 16px;
+        }
+
+        .history-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background-color 0.2s;
+        }
+
+        .history-item:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .sidebar-footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            padding-top: 16px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .sidebar-footer button {
+            flex: 1;
+            padding: 8px;
+            background-color: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.2s;
+        }
+
+        .sidebar-footer button:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: #fff;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .messages {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-weight: 600;
+            color: white;
+            font-size: 14px;
+        }
+
+        .user .message-avatar {
+            background-color: var(--primary-color);
+            order: 2;
+        }
+
+        .assistant .message-avatar {
+            background-color: var(--secondary-color);
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .user .message-content {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .assistant .message-content {
+            background-color: var(--message-assistant-bg);
+            color: var(--text-primary);
+        }
+
+        .message-text {
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .message-text a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .message-text a:hover {
+            text-decoration: underline;
+        }
+
+        .sources {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .sources-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .source-item {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            padding: 6px;
+            background-color: rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+        }
+
+        .source-label {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .input-container {
+            padding: 16px 24px 24px;
+            border-top: 1px solid var(--border-color);
+            background-color: #fff;
+        }
+
+        .input-form {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        .input-box {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            max-height: 200px;
+            min-height: 48px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-box:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+        }
+
+        .submit-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: background-color 0.2s;
+            flex-shrink: 0;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            background-color: #0e8f6f;
+        }
+
+        .submit-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 20px;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .empty-state-subtext {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 0;
+                position: absolute;
+                height: 100%;
+                z-index: 100;
+                transition: width 0.3s;
+            }
+
+            .sidebar.open {
+                width: 260px;
+            }
+
+            .message-content {
+                max-width: 90%;
+            }
+
+            .chat-container {
+                padding: 12px;
+            }
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>⚖️ Advocate GPT</h1>
+            </div>
+            
+            <button class="new-chat-btn" onclick="startNewConversation()">+ New Chat</button>
+            
+            <div class="conversation-history" id="historyContainer">
+                <!-- Conversation history will be added here -->
+            </div>
+            
+            <div class="sidebar-footer">
+                <button onclick="clearConversation()">Clear</button>
+                <button onclick="toggleAbout()">About</button>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-content">
+            <div class="chat-container" id="chatContainer">
+                <!-- Messages will be added here -->
+                <div class="empty-state">
+                    <div class="empty-state-icon">📚</div>
+                    <div class="empty-state-text">Advocate GPT</div>
+                    <div class="empty-state-subtext">Ask me legal questions about the documents in the knowledge base</div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-container">
+                <form class="input-form" onsubmit="sendMessage(event)">
+                    <div class="input-wrapper">
+                        <textarea 
+                            class="input-box" 
+                            id="messageInput" 
+                            placeholder="Ask a legal question..."
+                            rows="1"
+                        ></textarea>
+                    </div>
+                    <button type="submit" class="submit-btn" id="submitBtn">
+                        <span id="submitIcon">➤</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Generate unique session ID
+        const sessionId = generateSessionId();
+        const messagesContainer = document.getElementById('chatContainer');
+        const messageInput = document.getElementById('messageInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const submitIcon = document.getElementById('submitIcon');
+        let isLoading = false;
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+
+        // Handle Enter key to send (Shift+Enter for new line)
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(e);
+            }
+        });
+
+        async function sendMessage(event) {
+            event.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message || isLoading) return;
+
+            isLoading = true;
+            submitBtn.disabled = true;
+            submitIcon.textContent = '';
+            submitIcon.className = 'loading-spinner';
+
+            // Add user message to chat
+            addMessage('user', message);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+
+            try {
+                // Send query to backend
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: message,
+                        session_id: sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('assistant', `Error: ${data.error}`);
+                } else {
+                    addMessage('assistant', data.answer, data.sources);
+                    // Scroll to bottom
+                    scrollToBottom();
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                addMessage('assistant', `Sorry, an error occurred: ${error.message}`);
+            } finally {
+                isLoading = false;
+                submitBtn.disabled = false;
+                submitIcon.textContent = '➤';
+                submitIcon.className = '';
+                messageInput.focus();
+            }
+        }
+
+        function addMessage(role, content, sources = null) {
+            // Remove empty state if this is the first message
+            const emptyState = messagesContainer.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? 'You' : '⚖️';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            const textDiv = document.createElement('div');
+            textDiv.className = 'message-text';
+            textDiv.textContent = content;
+            contentDiv.appendChild(textDiv);
+
+            // Add sources if available (only for assistant messages)
+            if (role === 'assistant' && sources && sources.length > 0) {
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'sources';
+
+                const sourcesTitle = document.createElement('div');
+                sourcesTitle.className = 'sources-title';
+                sourcesTitle.textContent = 'Sources:';
+                sourcesDiv.appendChild(sourcesTitle);
+
+                sources.forEach((source, index) => {
+                    const sourceItem = document.createElement('div');
+                    sourceItem.className = 'source-item';
+                    sourceItem.innerHTML = `
+                        <span class="source-label">Source ${index + 1}:</span>
+                        <div style="margin-top: 4px; word-break: break-word;">${source.text}</div>
+                        <div style="margin-top: 4px; font-size: 11px; opacity: 0.7;">📄 ${source.source} (Page: ${source.page})</div>
+                    `;
+                    sourcesDiv.appendChild(sourceItem);
+                });
+
+                contentDiv.appendChild(sourcesDiv);
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            messagesContainer.appendChild(messageDiv);
+
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function startNewConversation() {
+            messagesContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📚</div>
+                    <div class="empty-state-text">Advocate GPT</div>
+                    <div class="empty-state-subtext">Ask me legal questions about the documents in the knowledge base</div>
+                </div>
+            `;
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            messageInput.focus();
+        }
+
+        function clearConversation() {
+            if (confirm('Are you sure you want to clear the conversation?')) {
+                fetch(`/api/clear/${sessionId}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        startNewConversation();
+                    })
+                    .catch(error => console.error('Error:', error));
+            }
+        }
+
+        function toggleAbout() {
+            alert('Advocate GPT\n\nA legal RAG assistant powered by:\n• FAISS Vector Search\n• Sentence Transformers\n• OpenAI GPT-4\n\nVersion 1.0');
+        }
+
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Check API health on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/api/health');
+                if (!response.ok) {
+                    console.error('API health check failed');
+                    addMessage('assistant', 'Warning: Could not connect to the API server. Please make sure it is running.');
+                }
+            } catch (error) {
+                console.error('Error connecting to API:', error);
+            }
+            messageInput.focus();
+        });
+    </script>
+</body>
+</html>
