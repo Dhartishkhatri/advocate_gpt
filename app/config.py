@@ -34,8 +34,17 @@ RETRIEVAL_METHOD = "hierarchical_retrieval"
 retrieval_methods = (
     "bm25_retrieval",
     "fusion_retrieval",
+    "get_best_segments",
     "hierarchical_retrieval",
 )
+
+RERANKING_METHOD = "greedy_dartboard_search"
+reranking_methods = (
+    "greedy_dartboard_search",
+    "weighted_reciprocal_rank_fusion",
+)
+
+
 FUSION_ALPHA = 0.5
 HIERARCHICAL_SUMMARY_K = 3
 

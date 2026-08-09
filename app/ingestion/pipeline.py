@@ -116,7 +116,7 @@ def generate_document_title(document_text: str, document_title_guidance: str = "
     if len(tokens) >= max_content_tokens:
         truncation_message = (
             "Also note that the document text provided below is just the first "
-            "~3000 words of the document. That should be plenty for this task. "
+            "~4000 words of the document. That should be plenty for this task. "
             "Your response should still pertain to the entire document, not just "
             "the text provided below."
         )

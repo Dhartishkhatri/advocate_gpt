@@ -2,7 +2,8 @@ def extract_text_from_pdf_using_pypdf(file_path):
     """
     Extract text from PDF using pypdf. Use pypdf when you want to change the PDF file.
     Examples: merge PDFs, split pages, rotate pages, add password, crop pages, read metadata. 
-    The official project describes it as a pure-Python library for splitting, merging, cropping, transforming pages, adding passwords, and retrieving text/metadata.
+    The official project describes it as a pure-Python library for splitting, merging, cropping, transforming pages,
+    adding passwords, and retrieving text/metadata.
     """
     from pypdf import PdfReader
     elements = PdfReader(file_path)
@@ -16,7 +17,8 @@ def extract_text_from_pdf_using_pypdf(file_path):
 def extract_text_from_pdf_using_unstructured(file_path):
     """
     Extract text from PDF using unstructured.
-    This method extracts text from the PDF while preserving the structure of the document, including titles, narrative text, and tables. 
+    This method extracts text from the PDF while preserving the structure of the document, including titles, narrative text, 
+    and tables. 
     Use this method when you need structured chunks, metadata, and support for multiple file types.
     """
     from unstructured.partition.pdf import partition_pdf
@@ -39,7 +41,8 @@ def extract_text_from_pdf_using_pdfplumber(file_path):
     """
     Extract text from PDF using pdfplumber.
     Use pdfplumber when you want to extract data from PDFs, especially tables.
-    It exposes detailed PDF layout information such as characters, rectangles, lines, and tables, and works best on machine-generated PDFs rather than scanned PDFs.
+    It exposes detailed PDF layout information such as characters, rectangles, lines, and tables, and works best on 
+    machine-generated PDFs rather than scanned PDFs.
     """
     import pdfplumber
 
@@ -56,7 +59,8 @@ def extract_text_from_pdf_using_pymupdf(file_path):
     """
     Extract text from PDF using PyMuPDF (fitz).
     Use PyMuPDF when you want speed, rendering, images, annotations, or general extraction.
-    PyMuPDF describes itself as a high-performance library for extraction, analysis, conversion, and manipulation of PDF and other document formats.
+    PyMuPDF describes itself as a high-performance library for extraction, analysis, conversion, and manipulation of PDF and
+    other document formats.
     It also supports image extraction and OCR workflows with Tesseract installed separately.
     """
     import fitz  # PyMuPDF

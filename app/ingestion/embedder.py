@@ -5,6 +5,8 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from app.config import EMBEDDING_MODEL
+
+
 # Initialize model
 model = SentenceTransformer(EMBEDDING_MODEL)
 
