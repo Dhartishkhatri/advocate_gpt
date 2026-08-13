@@ -7,16 +7,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 
-def hierarchical_retrieval(
-    summary_store,
-    detail_store,
-    query: str,
-    k: int = 5,
-    summary_k: int = 3,
-) -> List[Dict[str, Any]]:
+def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,summary_k: int = 3,) -> List[Dict[str, Any]]:
     """Retrieve parent summaries first, then their most relevant child chunks."""
-    if not query or summary_store is None or detail_store is None or k <= 0:
-        return []
 
     from app.ingestion.embedder import embed_batch
 
@@ -71,13 +63,8 @@ def bm25_retrieval(
     bm25_index: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Return the top ``k`` documents ranked by their BM25 score."""
-    if not query or not documents or k <= 0:
-        return []
 
     query_terms = re.findall(r"\w+", query.lower())
-
-    if not query_terms:
-        return []
 
     index = bm25_index
     document_count = index["document_count"]
@@ -192,16 +179,10 @@ def get_best_segments(relevance_values: list, max_length: int, overall_max_lengt
             if relevance_values[start] < 0:
                 continue
 
-            for end in range(
-                start + 1,
-                min(start + max_length + 1, len(relevance_values) + 1),
-            ):
+            for end in range(start + 1,min(start + max_length + 1, len(relevance_values) + 1)):
                 if relevance_values[end - 1] < 0:
                     continue
-                if any(
-                    start < segment_end and end > segment_start
-                    for segment_start, segment_end in best_segments
-                ):
+                if any(start < segment_end and end > segment_start for segment_start, segment_end in best_segments):
                     continue
                 if total_length + end - start > overall_max_length:
                     continue

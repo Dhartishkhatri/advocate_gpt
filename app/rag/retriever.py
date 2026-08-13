@@ -110,28 +110,25 @@ def retrieve(question, store=None, k=5):
     try:
         retrieval_method = retrieval_methods.get(config.RETRIEVAL_METHOD)
 
-        if config.RETRIEVAL_METHOD == "hierarchical_retrieval":
+        if retrieval_method == "hierarchical_retrieval":
             summary_store = FAISSStore.load(
                 config.SUMMARY_VECTOR_STORE_PATH,
                 config.SUMMARY_METADATA_PATH,
             )
-            detail_store = store or FAISSStore.load()
+    
             results = retrieval_method(
                 summary_store,
-                detail_store,
+                store,
                 question,
                 k=k,
                 summary_k=config.HIERARCHICAL_SUMMARY_K,
             )
         else:
-            store = store or FAISSStore.load()
-            if store is None:
-                raise ValueError("FAISS index not found. Ingest PDFs first.")
 
             with open(config.BM25_INDEX_PATH,"r",encoding="utf-8") as index_file:
                 bm25_index = json.load(index_file)
 
-            if config.RETRIEVAL_METHOD == "fusion_retrieval":
+            if retrieval_method == "fusion_retrieval":
                 query_vector = _embed_query(question)
                 vector_results = _vector_ranking(store, query_vector)
                 bm25_results = bm25_retrieval(
@@ -143,23 +140,12 @@ def retrieve(question, store=None, k=5):
                 candidate_count = min(len(store.metadata), max(k * 3, k))
 
             if config.RERANKING_METHOD == "greedy_dartboard_search":
-                results = _dartboard_rerank(store, query_vector, candidates, k)
+                results = _dartboard_rerank(store, query_vector, vector_results, k)
             elif config.RERANKING_METHOD == "weighted_reciprocal_rank_fusion":  
-                candidates = weighted_reciprocal_rank_fusion(
+                results = weighted_reciprocal_rank_fusion(
                     [vector_results, bm25_results],
                     weights=[config.FUSION_ALPHA, 1 - config.FUSION_ALPHA],
                     limit=candidate_count,
-                )
-            else:
-                if retrieval_method is None:
-                    raise ValueError(
-                        f"Unknown retrieval method: {config.RETRIEVAL_METHOD}"
-                    )
-                results = retrieval_method(
-                    question,
-                    store.metadata,
-                    k=k,
-                    bm25_index=bm25_index,
                 )
     except Exception as exc:
         logger.error(f"Error retrieving documents: {exc}")
