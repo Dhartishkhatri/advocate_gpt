@@ -44,8 +44,8 @@ def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,su
 
         results.append(
             {
-                **document,
-                "relevance_score": float(1 / (1 + distance)),
+                **document,   # add the document metadata to the result
+                "relevance_score": float(1 / (1 + distance)), #add the relevance score based on the distance
             }
         )
         if len(results) == k:
@@ -68,8 +68,6 @@ def bm25_retrieval(
 
     index = bm25_index
     document_count = index["document_count"]
-    if document_count != len(documents):
-        raise ValueError("BM25 index does not match document metadata")
 
     average_length = index["average_document_length"]
     document_frequencies = index["document_frequencies"]

@@ -206,29 +206,24 @@ def ingest_pdf(file_path: str):
         if not chunks:
             raise ValueError("No text chunks were extracted from the PDF")
 
-        all_docs = normalize_chunks(
-            chunks=chunks,
-            file_path=file_path
-        )
+        all_docs = normalize_chunks(chunks=chunks,file_path=file_path)
+
+
         os.makedirs("vector_store", exist_ok=True)
+        
+        # Create and save BM25 index
         bm25_index = create_bm25_index(all_docs)
-        embeddings = chunk_to_embed(all_docs)
-
-        if len(embeddings) == 0:
-            raise ValueError("No embeddings were generated")
-
-        dim = len(embeddings[0])
-
-        store = FAISSStore(dim)
-
-        store.add(
-            embeddings=embeddings,
-            docs=all_docs
-        )
-        store.save()
-
         with open(config.BM25_INDEX_PATH, "w", encoding="utf-8") as index_file:
             json.dump(bm25_index, index_file)
+
+        # Create and save embeddings
+        embeddings = chunk_to_embed(all_docs)
+        if len(embeddings) == 0:
+            raise ValueError("No embeddings were generated")
+        dim = len(embeddings[0])
+        store = FAISSStore(dim)
+        store.add(embeddings=embeddings,docs=all_docs)
+        store.save()
 
         return store
 
