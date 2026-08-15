@@ -30,7 +30,7 @@ pdf_chunking_methods = (
     "chunk_by_semantic",
 )
 
-RETRIEVAL_METHOD = "hierarchical_retrieval"
+RETRIEVAL_METHOD = "fusion_retrieval"
 retrieval_methods = (
     "bm25_retrieval",
     "fusion_retrieval",
@@ -38,7 +38,7 @@ retrieval_methods = (
     "hierarchical_retrieval",
 )
 
-RERANKING_METHOD = "greedy_dartboard_search"
+RERANKING_METHOD = "weighted_reciprocal_rank_fusion"
 reranking_methods = (
     "greedy_dartboard_search",
     "weighted_reciprocal_rank_fusion",

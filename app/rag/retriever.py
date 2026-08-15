@@ -82,28 +82,26 @@ def retrieve(question, store=None, k=5):
         retrieval_method = retrieval_methods.get(config.RETRIEVAL_METHOD)
 
         if retrieval_method == "hierarchical_retrieval":
-            summary_store = FAISSStore.load(config.SUMMARY_VECTOR_STORE_PATH,config.SUMMARY_METADATA_PATH)    
-            results = retrieval_method(summary_store,store,question,k=k,summary_k=config.HIERARCHICAL_SUMMARY_K)
-        else:
-
-            with open(config.BM25_INDEX_PATH,"r",encoding="utf-8") as index_file:
+            summary_store = FAISSStore.load(config.SUMMARY_VECTOR_STORE_PATH, config.SUMMARY_METADATA_PATH)    
+            results = retrieval_method(summary_store, store, question, k=k, summary_k=config.HIERARCHICAL_SUMMARY_K)
+        
+        elif retrieval_method == "fusion_retrieval":
+            with open(config.BM25_INDEX_PATH, "r", encoding="utf-8") as index_file:
                 bm25_index = json.load(index_file)
 
-            if retrieval_method == "fusion_retrieval":
-                query_vector = np.asarray(embed_batch([query])[0], dtype=np.float32)
-                _, indices = vectorstore.index.search(np.asarray([query_vector], dtype=np.float32),vectorstore.index.ntotal)
-                vector_results = [vectorstore.metadata[index] for index in indices[0] if index >= 0]
+            bm25_results = bm25_retrieval(question, store.metadata, len(store.metadata), bm25_index)
+            candidate_count = min(len(store.metadata), max(k * 3, k))
+            
+            query_vector = np.asarray(embed_batch([query])[0], dtype=np.float32)
+            _, indices = vectorstore.index.search(np.asarray([query_vector], dtype=np.float32), vectorstore.index.ntotal)
+            vector_results = [vectorstore.metadata[index] for index in indices[0] if index >= 0]
 
-                bm25_results = bm25_retrieval(question,store.metadata,k=len(store.metadata),bm25_index=bm25_index)
-                candidate_count = min(len(store.metadata), max(k * 3, k))
-
-            if config.RERANKING_METHOD == "greedy_dartboard_search":
-                results = _dartboard_rerank(store, query_vector, vector_results, k)
-            elif config.RERANKING_METHOD == "weighted_reciprocal_rank_fusion":
-                combined = [vector_results, bm25_results]
-                weights = [config.FUSION_ALPHA, 1 - config.FUSION_ALPHA]
-
-                results = weighted_reciprocal_rank_fusion(combined, weights, limit=candidate_count)
+        if config.RERANKING_METHOD == "greedy_dartboard_search":
+            results = _dartboard_rerank(store, query_vector, vector_results, k)
+        elif config.RERANKING_METHOD == "weighted_reciprocal_rank_fusion":
+            combined = [vector_results, bm25_results]
+            weights = [config.FUSION_ALPHA, 1 - config.FUSION_ALPHA]
+            results = weighted_reciprocal_rank_fusion(combined, weights, limit=candidate_count)
 
     except Exception as exc:
         logger.error(f"Error retrieving documents: {exc}")

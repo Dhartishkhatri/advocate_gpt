@@ -11,6 +11,14 @@ def scan_folder():
     """
     Scan PDF folder and ingest all documents.
     Includes error handling and progress tracking.
+    parameters:
+    -----------
+    None
+
+    returns:
+    --------
+    results : list
+        List of ingestion results (dictionary) for each PDF file.
     """
     logger.info(f"Scanning folder: {DATA_FOLDER}")
     logger.info(f"Using text extraction method: {PDF_TEXT_EXTRACTION_METHOD}")
@@ -26,11 +34,11 @@ def scan_folder():
     
     for file in pdf_files:
         if file not in PROCESSED:
-            path = os.path.join(DATA_FOLDER, file)
+            file_path = os.path.join(DATA_FOLDER, file)
             
             try:
                 logger.info(f"Ingesting: {file}")
-                status = process_pdf(path)
+                status = process_pdf(file_path)
                 results.append(status)
                 
                 if status.get("error"):

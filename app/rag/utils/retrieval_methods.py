@@ -16,23 +16,13 @@ def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,su
     query_vector = np.asarray([query_embedding], dtype=np.float32)
 
     summary_count = min(summary_k, summary_store.index.ntotal)
-    _, summary_indices = summary_store.index.search(
-        query_vector,
-        summary_count,
-    )
-    parent_ids = {
-        summary_store.metadata[index]["metadata"]["parent_id"]
-        for index in summary_indices[0]
-        if index >= 0
-    }
+    _, summary_indices = summary_store.index.search(query_vector, summary_count)
+    parent_ids = {summary_store.metadata[index]["metadata"]["parent_id"] for index in summary_indices[0] if index >= 0}
+
     if not parent_ids:
         return []
 
-    distances, detail_indices = detail_store.index.search(
-        query_vector,
-        detail_store.index.ntotal,
-    )
-
+    distances, detail_indices = detail_store.index.search(query_vector, detail_store.index.ntotal)
     results = []
     for distance, index in zip(distances[0], detail_indices[0]):
         if index < 0:
@@ -42,27 +32,36 @@ def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,su
         if document.get("metadata", {}).get("parent_id") not in parent_ids:
             continue
 
-        results.append(
-            {
-                **document,   # add the document metadata to the result
-                "relevance_score": float(1 / (1 + distance)), #add the relevance score based on the distance
-            }
-        )
+        results.append({**document,"relevance_score": float(1 / (1 + distance))})
         if len(results) == k:
             break
 
     return results
 
 
-def bm25_retrieval(
-    query: str,
-    documents: List[Dict[str, Any]],
-    k: int = 5,
-    k1: float = 1.5,
-    b: float = 0.75,
-    bm25_index: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """Return the top ``k`` documents ranked by their BM25 score."""
+def bm25_retrieval(query, documents, k, k1 = 1.5, b = 0.75, bm25_index = None):
+    """Return the top ``k`` documents ranked by their BM25 score.
+
+    parameters:
+    -----------
+    query : str
+        The search query string.
+    documents : list
+        List of document dictionaries with 'text' field.
+    k : int
+        Number of top documents to return.
+    k1 : float
+        BM25 parameter controlling term frequency saturation.
+    b : float
+        BM25 parameter controlling length normalization.
+    bm25_index : dict (optional)
+        Precomputed BM25 index. If None, it will be computed from the documents.
+    
+    returns:
+    --------
+    list
+        List of top ``k`` documents with their BM25 scores.
+    """
 
     query_terms = re.findall(r"\w+", query.lower())
 
@@ -75,11 +74,7 @@ def bm25_retrieval(
     scores = []
     for document_index, term_frequencies in enumerate(index["term_frequencies"]):
         document_length = index["document_lengths"][document_index]
-        length_normalization = (
-            1 - b + b * document_length / average_length
-            if average_length
-            else 1
-        )
+        length_normalization = (1 - b + b * document_length / average_length if average_length else 1)
         score = 0.0
 
         for term in query_terms:
@@ -88,23 +83,14 @@ def bm25_retrieval(
                 continue
 
             inverse_document_frequency = math.log(
-                1
-                + (document_count - document_frequencies[term] + 0.5)
-                / (document_frequencies[term] + 0.5)
+                1 + (document_count - document_frequencies[term] + 0.5) / (document_frequencies[term] + 0.5)
             )
-            score += inverse_document_frequency * (
-                frequency * (k1 + 1)
-                / (frequency + k1 * length_normalization)
-            )
+            score += inverse_document_frequency * (frequency * (k1 + 1) / (frequency + k1 * length_normalization))
 
         scores.append((score, document_index))
 
     scores.sort(key=lambda item: item[0], reverse=True)
-    return [
-        {**documents[index], "relevance_score": score}
-        for score, index in scores[:k]
-        if score > 0
-    ]
+    return [ {**documents[index], "relevance_score": score} for score, index in scores[:k] if score > 0 ]
 
 
 def fusion_retrieval(vectorstore, bm25: Dict[str, Any], query: str, k: int = 5, alpha: float = 0.5,) -> List[Dict[str, Any]]:

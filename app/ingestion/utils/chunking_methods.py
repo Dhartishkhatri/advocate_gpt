@@ -111,6 +111,20 @@ def chunk_by_paragraphs(text, max_chars=1500):
 def chunk_by_custom_splitter(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     """
     Split text into chunks using a custom splitter (e.g., langchain's RecursiveCharacterTextSplitter).
+
+    parameters:
+    -----------
+    text : str
+        The full text of the document to be chunked.
+    chunk_size : int
+        The maximum number of characters in each chunk.
+    chunk_overlap : int
+        The number of characters to overlap between consecutive chunks.
+    
+    returns:
+    --------
+    chunks : list
+        A list of text chunks.
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -186,6 +200,20 @@ DOCUMENT
 def chunk_by_adding_contextual_chunk_header(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     """
     Split text into chunks and add a contextual header to each chunk.
+
+    Parameters:
+    -----------
+    text : str
+        The full text of the document to be chunked.
+    chunk_size : int
+        The maximum number of characters in each chunk.
+    chunk_overlap : int
+        The number of characters to overlap between consecutive chunks.
+    
+    Returns:
+    --------
+    chunks_with_headers : list
+        A list of text chunks with contextual headers.
     """
     base_chunks = chunk_text(text, chunk_size, chunk_overlap)
     
@@ -205,10 +233,20 @@ def chunk_by_semantic(text):
     'percentile': Splits at differences greater than the X percentile.
     'standard_deviation': Splits at differences greater than X standard deviations.
     'interquartile': Uses the interquartile distance to determine split points.
+
+    Parameters:
+    -----------
+    text : str
+        The full text of the document to be chunked.
+
+    Returns:
+    --------
+    chunks : list
+        A list of semantically meaningful text chunks.
     """
     from langchain_experimental.text_splitter import SemanticChunker
     from langchain_openai.embeddings import OpenAIEmbeddings
 
     text_splitter = SemanticChunker(OpenAIEmbeddings(model = 'text-embedding-3-small'), breakpoint_threshold_type='percentile', breakpoint_threshold_amount=90) # chose which embeddings and breakpoint type and threshold to use
-    chunks = text_splitter.split_text([text])
+    chunks = text_splitter.split_text(text)
     return chunks

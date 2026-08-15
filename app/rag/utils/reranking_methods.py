@@ -89,16 +89,33 @@ def greedy_dartboard_search(query_distances,document_distances,documents,num_res
     return selected_documents, selection_scores
 
 
-def weighted_reciprocal_rank_fusion(
-    ranked_results: Sequence[Sequence[Mapping[str, Any]]],
+def weighted_reciprocal_rank_fusion(ranked_results: Sequence[Sequence[Mapping[str, Any]]],
     weights: Optional[Sequence[float]] = None,
     rank_constant: int = 60,
     limit: Optional[int] = None,
     id_key: str = "id",
 ) -> List[Dict[str, Any]]:
     
-    """Combine ranked document lists using weighted reciprocal rank fusion."""
-
+    """Combine ranked document lists using weighted reciprocal rank fusion.
+    Parameters:
+    -----------
+    ranked_results : Sequence[Sequence[Mapping[str, Any]]]
+        A sequence of ranked document lists, where each document is a mapping
+        containing at least an 'id' key.
+    weights : list (optional)
+        Weights for each ranked list. If None, equal weights are used.
+    rank_constant : int (optional)
+        Constant to adjust the influence of rank in the scoring formula.
+    limit : int (optional)
+        Maximum number of documents to return. If None, all documents are returned.
+    id_key : str (optional)
+        Key in the document mapping to use as the unique identifier. Default is 'id'.
+    
+    Returns:
+    --------
+    ranked_ids : List[Dict[str, Any]]
+        A list of document IDs sorted by their combined scores, limited to the specified number.
+    """
     result_lists = list(ranked_results)
     fusion_weights = list(weights) if weights is not None else [1.0] * len(result_lists)
 
@@ -115,9 +132,7 @@ def weighted_reciprocal_rank_fusion(
             seen_in_list.add(document_id)
             if document_id not in documents:
                 documents[document_id] = document
-            scores[document_id] = scores.get(document_id, 0.0) + (
-                weight / (rank_constant + rank)
-            )
+            scores[document_id] = scores.get(document_id, 0.0) + (weight / (rank_constant + rank))
 
     ranked_ids = sorted(scores, key=scores.get, reverse=True)[:limit]
 

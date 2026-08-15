@@ -32,7 +32,7 @@ pdf_text_extraction_methods = {
     "extract_text_from_pdf_using_pdfplumber": extract_text_from_pdf_using_pdfplumber,
     "extract_text_from_pdf_using_pymupdf": extract_text_from_pdf_using_pymupdf,
     "extract_text_from_pdf_using_tesseract": extract_text_from_pdf_using_tesseract,
-    "extract_text_from_pdf_using_pdfminer": extract_text_from_pdf_using_pdfminer,
+    "extract_text_from_pdf_using_pdfminer": extract_text_from_pdf_using_pdfminer
 }
 
 pdf_chunking_methods = {
@@ -44,29 +44,32 @@ pdf_chunking_methods = {
     "chunk_by_custom_splitter": chunk_by_custom_splitter,
     "chunk_by_adding_contextual_chunk_header": chunk_by_adding_contextual_chunk_header,
     "chunk_by_adding_contextual_document_header": chunk_by_adding_contextual_document_header,
-    "chunk_by_semantic": chunk_by_semantic,
+    "chunk_by_semantic": chunk_by_semantic
 }
 
 from app.logger import Logger
 logger = Logger.get_logger(__name__)
 
-def normalize_chunks(chunks: List[Any], file_path: str) -> List[Dict[str, Any]]:
+def normalize_chunks(chunks, file_path):
     """
     Convert chunks into standard document format for FAISS metadata.
+
+    Parameters:
+    -----------
+    chunks : list
+        List of text chunks extracted from the PDF.
+    file_path : str
+        Path to the original PDF file.
+
+    Returns:
+    --------
+    normalized_docs : list
+        List of normalized document dictionaries with 'id', 'text', and 'metadata'.
     """
     normalized_docs = []
 
     for i, chunk in enumerate(chunks):
-        if isinstance(chunk, dict):
-            text = str(chunk.get("text", "")).strip()
-            metadata = dict(chunk.get("metadata", {}) or {})
-
-            if not metadata:
-                metadata = {}
-        else:
-            text = str(chunk).strip()
-            metadata = {}
-
+        text = str(chunk).strip()
         if not text:
             continue
 
@@ -74,7 +77,6 @@ def normalize_chunks(chunks: List[Any], file_path: str) -> List[Dict[str, Any]]:
             "id": f"{os.path.basename(file_path)}_{i}",
             "text": text,
             "metadata": {
-                **metadata,
                 "source": file_path,
                 "filename": os.path.basename(file_path),
                 "chunk_id": i,
@@ -84,10 +86,21 @@ def normalize_chunks(chunks: List[Any], file_path: str) -> List[Dict[str, Any]]:
     return normalized_docs
 
 
-def chunk_to_embed(docs: List[Dict[str, Any]]) -> List[List[float]]:
+def chunk_to_embed(docs):
     """
     Create embeddings for all chunks.
+
+    Parameters:
+    -----------
+    docs : list
+        List of document dictionaries with 'text' field.
+
+    Returns:
+    --------
+    embeddings : list
+        List of embeddings corresponding to the document chunks.
     """
+
     texts = [doc["text"] for doc in docs]
 
     if not texts:
@@ -98,9 +111,21 @@ def chunk_to_embed(docs: List[Dict[str, Any]]) -> List[List[float]]:
     return embeddings
 
 
-def generate_document_title(document_text: str, document_title_guidance: str = "") -> str:
+def generate_document_title(document_text, document_title_guidance="") -> str:
     """
     Extract a document title using OpenAI.
+
+    Parameters:
+    -----------
+    document_text : str
+        The text of the document from which to extract the title.
+    document_title_guidance : str
+        Optional guidance for the title extraction.
+
+    Returns:
+    --------
+    title : str
+        The extracted title of the document.
     """
     from openai import OpenAI
     import tiktoken
@@ -146,42 +171,42 @@ DOCUMENT
 
 
 
-def create_bm25_index(documents, index_path=None):
-    tokenized_documents = [
-        re.findall(r"\w+", document.get("text", "").lower())
-        for document in documents
-    ]
+def create_bm25_index(chunks, index_path=None):
+    """
+    Create a BM25 index from the provided documents.
 
-    term_frequencies = [
-        dict(Counter(tokens))
-        for tokens in tokenized_documents
-    ]
+    Parameters:
+    -----------
+    chunks : list
+        List of chunk dictionaries with 'text' field.
+    index_path : str (optional)
+        Path to save the BM25 index as a JSON file. If None, the index is not saved.
 
-    document_frequencies = Counter(
-        term
-        for tokens in tokenized_documents
-        for term in set(tokens)
-    )
+    Returns:
+    --------
+    index : dict
+        BM25 index containing term frequencies, chunk frequencies, and other metadata.
+    """
 
-    document_lengths = [
-        len(tokens)
-        for tokens in tokenized_documents
-    ]
+    tokenized_chunks = [re.findall(r"\w+", chunk.get("text", "").lower()) for chunk in chunks]
+
+    term_frequencies = [dict(Counter(tokens)) for tokens in tokenized_chunks]
+
+    chunk_frequencies = Counter(term for tokens in tokenized_chunks for term in set(tokens))
+    
+    chunk_length = [len(tokens) for tokens in tokenized_chunks]
 
     index = {
-        "document_count": len(documents),
-        "average_document_length": (
-            sum(document_lengths) / len(documents)
-            if documents else 0
-        ),
-        "document_lengths": document_lengths,
+        "chunk_count": len(chunks),
+        "average_chunk_length": (sum(chunk_length) / len(chunks) if chunks else 0),
+        "chunk_lengths": chunk_length,
         "term_frequencies": term_frequencies,
-        "document_frequencies": dict(document_frequencies),
+        "chunk_frequencies": dict(chunk_frequencies),
     }
 
     return index
 
-def ingest_pdf(file_path: str):
+def ingest_pdf(file_path):
     """
     Full PDF ingestion pipeline:
     1. Extract PDF text
@@ -189,7 +214,18 @@ def ingest_pdf(file_path: str):
     3. Embed chunks
     4. Store embeddings in FAISS
     5. Save FAISS index
+
+    Parameters:
+    -----------
+    file_path : str
+        Path to the PDF file to be ingested.
+    
+    Returns:
+    --------
+    store : FAISSStore or None
+        Returns FAISSStore object if successful, None if an error occurred.
     """
+
     logger.info(f"Starting ingestion pipeline for: {file_path}")
     try:
         pdf_text_extraction_method = pdf_text_extraction_methods.get(config.PDF_TEXT_EXTRACTION_METHOD)
@@ -198,15 +234,14 @@ def ingest_pdf(file_path: str):
         chunking_method = pdf_chunking_methods.get(config.PDF_CHUNKING_METHOD)
         if config.PDF_CHUNKING_METHOD == "chunk_by_adding_contextual_chunk_header":
             header = generate_document_title(text)
-            chunks = chunking_method(text,header=header)
-            
+            chunks = chunking_method(text,header)        
         else:
             chunks = chunking_method(text)
 
         if not chunks:
             raise ValueError("No text chunks were extracted from the PDF")
 
-        all_docs = normalize_chunks(chunks=chunks,file_path=file_path)
+        all_docs = normalize_chunks(chunks,file_path)
 
 
         os.makedirs("vector_store", exist_ok=True)
@@ -232,16 +267,23 @@ def ingest_pdf(file_path: str):
         return None
 
 
-def process_pdf(path: str):
+def process_pdf(file_path):
     """
     Process a single PDF file with error handling and metrics.
 
+    Parameters:
+    -----------
+    file_path : str
+        Path to the PDF file to be processed.
+
     Returns:
+    --------
+    status : dict
         Status dictionary with processing results.
     """
     status = {
-        "file": path,
-        "filename": os.path.basename(path),
+        "file": file_path,
+        "filename": os.path.basename(file_path),
         "text_extracted": False,
         "num_chunks": 0,
         "embedded": False,
@@ -249,7 +291,7 @@ def process_pdf(path: str):
     }
 
     try:
-        store = ingest_pdf(path)
+        store = ingest_pdf(file_path)
 
         if store is None:
             raise RuntimeError("PDF ingestion failed")
@@ -258,9 +300,9 @@ def process_pdf(path: str):
         status["num_chunks"] = len(store.metadata)
         status["embedded"] = True
 
-        logger.info(f"Successfully processed {path}: ")
+        logger.info(f"Successfully processed {file_path}: ")
 
     except Exception as e:
-        logger.error(f"Error processing {path}: {str(e)}")
+        logger.error(f"Error processing {file_path}: {str(e)}")
         status["error"] = str(e)
     return status
