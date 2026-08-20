@@ -169,42 +169,126 @@ DOCUMENT
     )
     return response.choices[0].message.content.strip()
 
+def tokenize_bm25(text):
+    """Use the same tokenizer when indexing and searching."""
+    return re.findall(r"\w+", text.lower(), flags=re.UNICODE)
 
 
 def create_bm25_index(chunks, index_path=None):
+    """Create a term-to-chunks inverted BM25 index.
+
+    The important fields have this shape:
+
+        chunk_lengths[chunk_id] = number of tokens in the chunk
+        postings[term] = [[chunk_id, term_frequency], ...]
+        chunk_frequencies[term] = number of chunks containing the term
+
+    Lists are used instead of tuples in postings because JSON serializes tuples
+    as lists anyway.
     """
-    Create a BM25 index from the provided documents.
+    postings = defaultdict(list)
+    chunk_lengths = {}
+    total_chunk_length = 0
 
-    Parameters:
-    -----------
-    chunks : list
-        List of chunk dictionaries with 'text' field.
-    index_path : str (optional)
-        Path to save the BM25 index as a JSON file. If None, the index is not saved.
+    for fallback_position, chunk in enumerate(chunks):
+        chunk_id = str(chunk.get("id", fallback_position))
+        tokens = tokenize_bm25(chunk.get("text", ""))
 
-    Returns:
-    --------
-    index : dict
-        BM25 index containing term frequencies, chunk frequencies, and other metadata.
-    """
+        if not tokens:
+            continue
 
-    tokenized_chunks = [re.findall(r"\w+", chunk.get("text", "").lower()) for chunk in chunks]
+        term_frequencies = Counter(tokens)
+        chunk_length = len(tokens)
 
-    term_frequencies = [dict(Counter(tokens)) for tokens in tokenized_chunks]
+        chunk_lengths[chunk_id] = chunk_length
+        total_chunk_length += chunk_length
 
-    chunk_frequencies = Counter(term for tokens in tokenized_chunks for term in set(tokens))
-    
-    chunk_length = [len(tokens) for tokens in tokenized_chunks]
+        # Each term is added once for this chunk, together with its TF.
+        for term, term_frequency in term_frequencies.items():
+            postings[term].append([chunk_id, term_frequency])
 
-    index = {
-        "chunk_count": len(chunks),
-        "average_chunk_length": (sum(chunk_length) / len(chunks) if chunks else 0),
-        "chunk_lengths": chunk_length,
-        "term_frequencies": term_frequencies,
-        "chunk_frequencies": dict(chunk_frequencies),
+    chunk_count = len(chunk_lengths)
+
+    # One posting exists for every distinct chunk containing the term.
+    chunk_frequencies = {
+        term: len(term_postings)
+        for term, term_postings in postings.items()
     }
 
+    index = {
+        "version": 1,
+        "chunk_count": chunk_count,
+        "total_chunk_length": total_chunk_length,
+        "average_chunk_length": (
+            total_chunk_length / chunk_count if chunk_count else 0.0
+        ),
+        "chunk_lengths": chunk_lengths,
+        "postings": dict(postings),
+        "chunk_frequencies": chunk_frequencies,
+    }
+
+    if index_path is not None:
+        save_bm25_index(index, index_path)
+
     return index
+
+
+def update_bm25_index(new_chunks, index_path):
+    """Append previously unseen chunks to an existing BM25 JSON index.
+
+    This operation is idempotent when chunk IDs are stable: a chunk already in
+    ``chunk_lengths`` is skipped. Use one writer process, and call this with a
+    reasonably large batch instead of rewriting the JSON file for every PDF.
+
+    Returns:
+        tuple[dict, int]: Updated index and number of newly added chunks.
+    """
+    with index_path.open("r", encoding="utf-8") as index_file:
+        index = json.load(index_file)
+
+    existing_chunk_ids = set(index["chunk_lengths"])
+    added_count = 0
+
+    for fallback_position, chunk in enumerate(new_chunks):
+        chunk_id = str(chunk.get("id", fallback_position))
+
+        if chunk_id in existing_chunk_ids:
+            continue
+
+        tokens = tokenize_bm25(chunk.get("text", ""))
+        if not tokens:
+            continue
+
+        term_frequencies = Counter(tokens)
+        chunk_length = len(tokens)
+
+        index["chunk_lengths"][chunk_id] = chunk_length
+        index["chunk_count"] += 1
+        index["total_chunk_length"] += chunk_length
+
+        for term, term_frequency in term_frequencies.items():
+            index["postings"].setdefault(term, []).append(
+                [chunk_id, term_frequency]
+            )
+            # A Counter contains each term once, so this increments once per
+            # new chunk containing the term.
+            index["chunk_frequencies"][term] = (
+                index["chunk_frequencies"].get(term, 0) + 1
+            )
+
+        existing_chunk_ids.add(chunk_id)
+        added_count += 1
+
+    index["average_chunk_length"] = (
+        index["total_chunk_length"] / index["chunk_count"]
+        if index["chunk_count"]
+        else 0.0
+    )
+
+    save_bm25_index(index, index_path)
+    return index, added_count
+
+
 
 def ingest_pdf(file_path):
     """
@@ -244,23 +328,29 @@ def ingest_pdf(file_path):
         all_docs = normalize_chunks(chunks,file_path)
 
 
-        os.makedirs("vector_store", exist_ok=True)
-        
-        # Create and save BM25 index
-        bm25_index = create_bm25_index(all_docs)
-        with open(config.BM25_INDEX_PATH, "w", encoding="utf-8") as index_file:
-            json.dump(bm25_index, index_file)
+        bm25_index_path = Path(config.BM25_INDEX_PATH)
 
-        # Create and save embeddings
+        if bm25_index_path.is_file():
+            _, bm25_added = update_bm25_index(new_chunks=all_docs,index_path=bm25_index_path)
+            logger.info("Updated BM25 index with %d chunks", bm25_added)
+        else:
+            bm25_index = create_bm25_index(all_docs)
+            save_bm25_index(bm25_index, bm25_index_path)
+            bm25_added = bm25_index["chunk_count"]
+            logger.info("Created BM25 index with %d chunks", bm25_added)
+
+
+        vector_store = FAISSStore.load()
         embeddings = chunk_to_embed(all_docs)
+
         if len(embeddings) == 0:
             raise ValueError("No embeddings were generated")
         dim = len(embeddings[0])
-        store = FAISSStore(dim)
-        store.add(embeddings=embeddings,docs=all_docs)
-        store.save()
+        vector_store = FAISSStore(dim)
+        vector_store.add(embeddings=embeddings, docs=all_docs)
+        vector_store.save()
 
-        return store
+        return vector_store
 
     except Exception as e:
         logger.error(f"Error during {file_path} ingestion: {str(e)}")
