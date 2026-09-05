@@ -7,7 +7,7 @@ ingestion pipeline behavior.
 
 DATA_FOLDER = "pdfs/"
 
-PDF_TEXT_EXTRACTION_METHOD = "extract_text_from_pdf_using_unstructured"
+PDF_TEXT_EXTRACTION_METHOD = "extract_text_from_pdf_using_pymupdf"
 pdf_text_extraction_methods = (
     "extract_text_from_pdf_using_pypdf",
     "extract_text_from_pdf_using_unstructured",

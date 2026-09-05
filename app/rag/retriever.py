@@ -1,6 +1,7 @@
 import json
 
 import numpy as np
+import faiss
 
 from app import config
 from app.ingestion.utils.faiss import FAISSStore
@@ -11,11 +12,10 @@ from app.rag.utils.reranking_methods import (
 )
 from app.rag.utils.retrieval_methods import (
     bm25_retrieval,
-    fusion_retrieval,
     get_best_segments,
-    hierarchical_retrieval,
+    hierarchical_retrieval
 )
-retrieval_methods = {"bm25_retrieval": bm25_retrieval,"fusion_retrieval": fusion_retrieval,"get_best_segments": get_best_segments,
+retrieval_methods = {"bm25_retrieval": bm25_retrieval,"get_best_segments": get_best_segments,
 "hierarchical_retrieval": hierarchical_retrieval}
 
 reranking_methods = {"greedy_dartboard_search": greedy_dartboard_search,
@@ -81,27 +81,54 @@ def retrieve(question, store=None, k=5):
         from app.ingestion.embedder import embed_batch
         retrieval_method = retrieval_methods.get(config.RETRIEVAL_METHOD)
 
-        if retrieval_method == "hierarchical_retrieval":
+        if config.RETRIEVAL_METHOD == "hierarchical_retrieval":
             summary_store = FAISSStore.load(config.SUMMARY_VECTOR_STORE_PATH, config.SUMMARY_METADATA_PATH)    
             results = retrieval_method(summary_store, store, question, k=k, summary_k=config.HIERARCHICAL_SUMMARY_K)
         
-        elif retrieval_method == "fusion_retrieval":
+        elif config.RETRIEVAL_METHOD == "fusion_retrieval":
             with open(config.BM25_INDEX_PATH, "r", encoding="utf-8") as index_file:
                 bm25_index = json.load(index_file)
 
-            bm25_results = bm25_retrieval(question, store.metadata, len(store.metadata), bm25_index)
-            candidate_count = min(len(store.metadata), max(k * 3, k))
-            
-            query_vector = np.asarray(embed_batch([query])[0], dtype=np.float32)
-            _, indices = vectorstore.index.search(np.asarray([query_vector], dtype=np.float32), vectorstore.index.ntotal)
-            vector_results = [vectorstore.metadata[index] for index in indices[0] if index >= 0]
+            bm25_results = bm25_retrieval(question, bm25_index, k)
+            logger.info(f"BM25 results: {bm25_results}")
+
+
+            index = faiss.read_index(config.VECTOR_STORE_PATH)
+            with open(config.METADATA_PATH, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            metadata_by_id = {chunk["id"]: chunk for chunk in metadata}
+
+            query_vector = embed_batch([question])
+            search_k = min(k, index.ntotal)
+            vector_scores, indices = index.search(query_vector, search_k)
+            vector_results = [
+                {
+                    "chunk_id": metadata[chunk_index]["id"],
+                    "vector_score": float(vector_score),
+                }
+                for vector_score, chunk_index in zip(vector_scores[0], indices[0])
+                if chunk_index >= 0
+            ]
+            logger.info(f"Vector results: {vector_results}")
+
 
         if config.RERANKING_METHOD == "greedy_dartboard_search":
             results = _dartboard_rerank(store, query_vector, vector_results, k)
         elif config.RERANKING_METHOD == "weighted_reciprocal_rank_fusion":
-            combined = [vector_results, bm25_results]
-            weights = [config.FUSION_ALPHA, 1 - config.FUSION_ALPHA]
-            results = weighted_reciprocal_rank_fusion(combined, weights, limit=candidate_count)
+            weights = {"bm25": config.FUSION_ALPHA, "vector": 1 - config.FUSION_ALPHA}
+            chunks_to_return = weighted_reciprocal_rank_fusion(
+                bm25_results, vector_results, weights, id_key="chunk_id"
+            )
+            results = [
+                {
+                    **metadata_by_id[chunk_info["id"]],     #unpacking dictionary to include all metadata_by_id fields
+                    "rrf_score": chunk_info["rrf_score"],
+                    "final_rank": chunk_info["final_rank"],
+                }
+                for chunk_info in chunks_to_return if chunk_info["id"] in metadata_by_id
+            ]
+            logger.info(f"RRF results: {chunks_to_return}")
+            logger.info(f"Final results: {results}")
 
     except Exception as exc:
         logger.error(f"Error retrieving documents: {exc}")

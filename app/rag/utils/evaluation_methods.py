@@ -1,0 +1,1 @@
+# Add evaluation methods for RAG (Retrieval-Augmented Generation) models, including metrics for assessing the quality of generated responses and the effectiveness of retrieval mechanisms.

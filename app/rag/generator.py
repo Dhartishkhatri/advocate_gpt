@@ -11,6 +11,7 @@ logger = Logger.get_logger(__name__)
 def generate_answer(query,docs):
     """Generate a simple answer from retrieved documents."""
     try:
+        logger.info(f"Generating answer for query: {query} with context: {docs} using provider: {LLM_PROVIDER}")
         answer = generate_answer_ollama(query, docs)
 
         return {

@@ -3,11 +3,11 @@ import math
 import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
-
+from app.ingestion.pipeline import tokenize_bm25
 import numpy as np
 
 
-def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,summary_k: int = 3,) -> List[Dict[str, Any]]:
+def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,summary_k: int = 3):
     """Retrieve parent summaries first, then their most relevant child chunks."""
 
     from app.ingestion.embedder import embed_batch
@@ -39,113 +39,50 @@ def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,su
     return results
 
 
-def bm25_retrieval(query, documents, k, k1 = 1.5, b = 0.75, bm25_index = None):
-    """Return the top ``k`` documents ranked by their BM25 score.
+def bm25_retrieval(query, bm25_index, k, k1=1.5, b=0.75):
+    """Return the top k chunk IDs with their BM25 scores."""
 
-    parameters:
-    -----------
-    query : str
-        The search query string.
-    documents : list
-        List of document dictionaries with 'text' field.
-    k : int
-        Number of top documents to return.
-    k1 : float
-        BM25 parameter controlling term frequency saturation.
-    b : float
-        BM25 parameter controlling length normalization.
-    bm25_index : dict (optional)
-        Precomputed BM25 index. If None, it will be computed from the documents.
-    
-    returns:
-    --------
-    list
-        List of top ``k`` documents with their BM25 scores.
-    """
+    query_terms = set(tokenize_bm25(query))
 
-    query_terms = re.findall(r"\w+", query.lower())
+    chunk_count = bm25_index["chunk_count"]
+    average_chunk_length = bm25_index["average_chunk_length"]
+    postings = bm25_index["postings"]
+    chunk_frequencies = bm25_index["chunk_frequencies"]
+    chunk_lengths = bm25_index["chunk_lengths"]
 
-    index = bm25_index
-    document_count = index["document_count"]
+    scores = {}
 
-    average_length = index["average_document_length"]
-    document_frequencies = index["document_frequencies"]
+    for term in query_terms:
+        term_postings = postings.get(term, [])
+        if not term_postings:
+            continue
+        document_frequency = chunk_frequencies[term]
 
-    scores = []
-    for document_index, term_frequencies in enumerate(index["term_frequencies"]):
-        document_length = index["document_lengths"][document_index]
-        length_normalization = (1 - b + b * document_length / average_length if average_length else 1)
-        score = 0.0
+        inverse_document_frequency = math.log(1 + ((chunk_count - document_frequency + 0.5)/ (document_frequency + 0.5)))
 
-        for term in query_terms:
-            frequency = term_frequencies.get(term, 0)
-            if not frequency:
-                continue
+        # Each item is: [chunk_id, term_frequency]
+        for chunk_id, term_frequency in term_postings:
+            chunk_id = str(chunk_id)
+            chunk_length = chunk_lengths[chunk_id]
 
-            inverse_document_frequency = math.log(
-                1 + (document_count - document_frequencies[term] + 0.5) / (document_frequencies[term] + 0.5)
-            )
-            score += inverse_document_frequency * (frequency * (k1 + 1) / (frequency + k1 * length_normalization))
+            length_normalization = (1 - b + b * (chunk_length / average_chunk_length) if average_chunk_length else 1)
 
-        scores.append((score, document_index))
+            term_score = inverse_document_frequency * (term_frequency * (k1 + 1) / (term_frequency + k1 * length_normalization))
 
-    scores.sort(key=lambda item: item[0], reverse=True)
-    return [ {**documents[index], "relevance_score": score} for score, index in scores[:k] if score > 0 ]
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + term_score
 
-
-def fusion_retrieval(vectorstore, bm25: Dict[str, Any], query: str, k: int = 5, alpha: float = 0.5,) -> List[Dict[str, Any]]:
-    """Combine BM25 and vector-search scores and return the top documents."""
-    documents = vectorstore.metadata
-
-    epsilon = 1e-8
-
-    # Get BM25 scores in the same order as the vector-store metadata.
-    bm25_results = bm25_retrieval(
-        query,
-        documents,
-        len(documents),
-        bm25_index=bm25,
-    )
-    bm25_by_id = {
-        document["id"]: document["relevance_score"]
-        for document in bm25_results
-    }
-    bm25_scores = np.array(
-        [bm25_by_id.get(document.get("id"), 0.0) for document in documents],
-        dtype=np.float32,
-    )
-
-    # FAISS returns L2 distances, so lower values are more relevant.
-    from app.ingestion.embedder import embed_batch
-
-    query_embedding = embed_batch([query])[0]
-    distances, indices = vectorstore.index.search(
-        np.asarray([query_embedding], dtype=np.float32),
-        len(documents),
-    )
-    vector_scores = np.zeros(len(documents), dtype=np.float32)
-    for distance, index in zip(distances[0], indices[0]):
-        if index >= 0:
-            vector_scores[index] = distance
-
-    vector_scores = 1 - (
-        (vector_scores - np.min(vector_scores))
-        / (np.max(vector_scores) - np.min(vector_scores) + epsilon)
-    )
-    bm25_scores = (
-        (bm25_scores - np.min(bm25_scores))
-        / (np.max(bm25_scores) - np.min(bm25_scores) + epsilon)
-    )
-
-    combined_scores = alpha * vector_scores + (1 - alpha) * bm25_scores
-    sorted_indices = np.argsort(combined_scores)[::-1]
+    ranked_results = sorted(
+        scores.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:k]
 
     return [
         {
-            **documents[index],
-            "relevance_score": float(combined_scores[index]),
+            "chunk_id": chunk_id,
+            "bm25_score": round(score, 4),
         }
-        for index in sorted_indices[:k]
+        for chunk_id, score in ranked_results
     ]
 
 

@@ -89,21 +89,20 @@ def greedy_dartboard_search(query_distances,document_distances,documents,num_res
     return selected_documents, selection_scores
 
 
-def weighted_reciprocal_rank_fusion(ranked_results: Sequence[Sequence[Mapping[str, Any]]],
-    weights: Optional[Sequence[float]] = None,
-    rank_constant: int = 60,
-    limit: Optional[int] = None,
-    id_key: str = "id",
-) -> List[Dict[str, Any]]:
+def weighted_reciprocal_rank_fusion(bm_25_results, vector_results, weights, rank_constant = 60, limit = None, id_key: str = "id"):
     
     """Combine ranked document lists using weighted reciprocal rank fusion.
     Parameters:
     -----------
-    ranked_results : Sequence[Sequence[Mapping[str, Any]]]
-        A sequence of ranked document lists, where each document is a mapping
-        containing at least an 'id' key.
-    weights : list (optional)
+    bm_25_results : List[Dict[str, Any]]
+        Ranked list of documents from BM25 retrieval.
+        example: [{"id": "doc1", "score": 0.9}, {"id": "doc2", "score": 0.8}, ...]
+    vector_results : List[Dict[str, Any]]
+        Ranked list of documents from vector-based retrieval.
+        example: [{"id": "doc3", "score": 0.95}, {"id": "doc4", "score": 0.85}, ...]
+    weights : dict (optional)
         Weights for each ranked list. If None, equal weights are used.
+        example: {"bm25": 0.6, "vector": 0.4} for BM25 and vector results respectively.
     rank_constant : int (optional)
         Constant to adjust the influence of rank in the scoring formula.
     limit : int (optional)
@@ -116,24 +115,23 @@ def weighted_reciprocal_rank_fusion(ranked_results: Sequence[Sequence[Mapping[st
     ranked_ids : List[Dict[str, Any]]
         A list of document IDs sorted by their combined scores, limited to the specified number.
     """
-    result_lists = list(ranked_results)
-    fusion_weights = list(weights) if weights is not None else [1.0] * len(result_lists)
+    fused_scores = {}
 
-    scores = {}
-    documents = {}
+    for rank, result in enumerate(bm_25_results, start=1):
+        chunk_id = result[id_key]
+        fused_scores[chunk_id] = fused_scores.get(chunk_id, 0) +  weights.get("bm25", 1) / (rank_constant + rank)
 
-    for results, weight in zip(result_lists, fusion_weights):
-        seen_in_list = set()
-        for rank, document in enumerate(results, start=1):
-            document_id = document[id_key]
-            if document_id in seen_in_list:
-                continue
+    for rank, result in enumerate(vector_results, start=1):
+        chunk_id = result[id_key]
+        fused_scores[chunk_id] = fused_scores.get(chunk_id, 0) + weights.get("vector", 1) / (rank_constant + rank)
 
-            seen_in_list.add(document_id)
-            if document_id not in documents:
-                documents[document_id] = document
-            scores[document_id] = scores.get(document_id, 0.0) + (weight / (rank_constant + rank))
+    ranked_results = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
 
-    ranked_ids = sorted(scores, key=scores.get, reverse=True)[:limit]
-
-    return ranked_ids
+    return [
+        {
+            "id": chunk_id,
+            "rrf_score": round(score, 6),
+            "final_rank": rank,
+        }
+        for rank, (chunk_id, score) in enumerate(ranked_results, start=1)
+    ]

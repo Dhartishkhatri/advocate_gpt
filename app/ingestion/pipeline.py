@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from collections import defaultdict
 import os
 import re
 from collections import Counter
@@ -76,11 +78,6 @@ def normalize_chunks(chunks, file_path):
         normalized_docs.append({
             "id": f"{os.path.basename(file_path)}_{i}",
             "text": text,
-            "metadata": {
-                "source": file_path,
-                "filename": os.path.basename(file_path),
-                "chunk_id": i,
-            }
         })
 
     return normalized_docs
@@ -170,28 +167,44 @@ DOCUMENT
     return response.choices[0].message.content.strip()
 
 def tokenize_bm25(text):
-    """Use the same tokenizer when indexing and searching."""
+    """
+    Use the same tokenizer when indexing and searching.
+    Parameters:
+    -----------
+    text : str
+        The text to tokenize.
+
+    Returns:
+    --------
+    tokens : list
+        The list of tokens.
+    """
+
     return re.findall(r"\w+", text.lower(), flags=re.UNICODE)
 
 
 def create_bm25_index(chunks, index_path=None):
-    """Create a term-to-chunks inverted BM25 index.
-
-    The important fields have this shape:
-
-        chunk_lengths[chunk_id] = number of tokens in the chunk
-        postings[term] = [[chunk_id, term_frequency], ...]
-        chunk_frequencies[term] = number of chunks containing the term
-
-    Lists are used instead of tuples in postings because JSON serializes tuples
-    as lists anyway.
     """
+    Create a term-to-chunks inverted BM25 index.
+    parameters:
+    -----------
+    chunks : list
+        List of chunk dictionaries with 'id' and 'text'.
+    index_path : str, optional
+        Path to save the BM25 index as a JSON file. If None, the index is not saved.
+
+    returns:
+    --------
+    index : dict
+        The BM25 index containing postings, chunk lengths, and frequencies.
+    """
+
     postings = defaultdict(list)
     chunk_lengths = {}
     total_chunk_length = 0
 
-    for fallback_position, chunk in enumerate(chunks):
-        chunk_id = str(chunk.get("id", fallback_position))
+    for chunk in chunks:
+        chunk_id = str(chunk.get("id", 'unknown'))
         tokens = tokenize_bm25(chunk.get("text", ""))
 
         if not tokens:
@@ -210,10 +223,7 @@ def create_bm25_index(chunks, index_path=None):
     chunk_count = len(chunk_lengths)
 
     # One posting exists for every distinct chunk containing the term.
-    chunk_frequencies = {
-        term: len(term_postings)
-        for term, term_postings in postings.items()
-    }
+    chunk_frequencies = {term: len(term_postings) for term, term_postings in postings.items()}
 
     index = {
         "version": 1,
@@ -233,24 +243,32 @@ def create_bm25_index(chunks, index_path=None):
     return index
 
 
-def update_bm25_index(new_chunks, index_path):
-    """Append previously unseen chunks to an existing BM25 JSON index.
-
-    This operation is idempotent when chunk IDs are stable: a chunk already in
-    ``chunk_lengths`` is skipped. Use one writer process, and call this with a
-    reasonably large batch instead of rewriting the JSON file for every PDF.
-
-    Returns:
-        tuple[dict, int]: Updated index and number of newly added chunks.
+def update_bm25_index(chunks, index_path):
     """
+    Update an existing BM25 index with new chunks.
+    parameters:
+    -----------
+    new_chunks : list
+        List of new chunk dictionaries with 'id' and 'text'.
+    index_path : str
+        Path to the existing BM25 index JSON file.
+    
+    returns:
+    --------
+    index : dict
+        The updated BM25 index.
+    added_count : int
+        The number of new chunks added to the index.
+    """
+
     with index_path.open("r", encoding="utf-8") as index_file:
         index = json.load(index_file)
 
     existing_chunk_ids = set(index["chunk_lengths"])
     added_count = 0
 
-    for fallback_position, chunk in enumerate(new_chunks):
-        chunk_id = str(chunk.get("id", fallback_position))
+    for chunk in chunks:
+        chunk_id = str(chunk.get("id", 'unknown'))
 
         if chunk_id in existing_chunk_ids:
             continue
@@ -267,27 +285,45 @@ def update_bm25_index(new_chunks, index_path):
         index["total_chunk_length"] += chunk_length
 
         for term, term_frequency in term_frequencies.items():
-            index["postings"].setdefault(term, []).append(
-                [chunk_id, term_frequency]
-            )
+            index["postings"].setdefault(term, []).append([chunk_id, term_frequency])
             # A Counter contains each term once, so this increments once per
             # new chunk containing the term.
-            index["chunk_frequencies"][term] = (
-                index["chunk_frequencies"].get(term, 0) + 1
-            )
+            index["chunk_frequencies"][term] = index["chunk_frequencies"].get(term, 0) + 1
 
         existing_chunk_ids.add(chunk_id)
         added_count += 1
 
-    index["average_chunk_length"] = (
-        index["total_chunk_length"] / index["chunk_count"]
-        if index["chunk_count"]
-        else 0.0
-    )
+    index["average_chunk_length"] = (index["total_chunk_length"] / index["chunk_count"] if index["chunk_count"] else 0.0)
 
     save_bm25_index(index, index_path)
     return index, added_count
 
+
+def save_bm25_index(index, index_path):
+    """Write BM25 atomically to avoid a partially written JSON file.
+    parameters:
+    -----------
+    index : dict
+        The BM25 index to save.
+    
+    index_path : str
+        Path to save the BM25 index as a JSON file.
+
+    returns:
+    --------
+    None    
+    """
+
+    index_path = Path(index_path)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = index_path.with_suffix(index_path.suffix + ".tmp")
+
+    with temporary_path.open("w", encoding="utf-8") as index_file:
+        json.dump(index, index_file, ensure_ascii=False)
+        index_file.flush()
+        os.fsync(index_file.fileno())
+
+    os.replace(temporary_path, index_path)
 
 
 def ingest_pdf(file_path):
@@ -331,8 +367,7 @@ def ingest_pdf(file_path):
         bm25_index_path = Path(config.BM25_INDEX_PATH)
 
         if bm25_index_path.is_file():
-            _, bm25_added = update_bm25_index(new_chunks=all_docs,index_path=bm25_index_path)
-            logger.info("Updated BM25 index with %d chunks", bm25_added)
+            _, bm25_added = update_bm25_index(chunks=all_docs,index_path=bm25_index_path)
         else:
             bm25_index = create_bm25_index(all_docs)
             save_bm25_index(bm25_index, bm25_index_path)
@@ -346,11 +381,12 @@ def ingest_pdf(file_path):
         if len(embeddings) == 0:
             raise ValueError("No embeddings were generated")
         dim = len(embeddings[0])
-        vector_store = FAISSStore(dim)
+        if vector_store is None:
+            vector_store = FAISSStore(dim)
         vector_store.add(embeddings=embeddings, docs=all_docs)
         vector_store.save()
 
-        return vector_store
+        return vector_store,len(all_docs)
 
     except Exception as e:
         logger.error(f"Error during {file_path} ingestion: {str(e)}")
@@ -371,6 +407,7 @@ def process_pdf(file_path):
     status : dict
         Status dictionary with processing results.
     """
+
     status = {
         "file": file_path,
         "filename": os.path.basename(file_path),
@@ -381,16 +418,16 @@ def process_pdf(file_path):
     }
 
     try:
-        store = ingest_pdf(file_path)
+        store, num_chunks = ingest_pdf(file_path)
 
         if store is None:
             raise RuntimeError("PDF ingestion failed")
         status["store"] = store
         status["text_extracted"] = True
-        status["num_chunks"] = len(store.metadata)
+        status["num_chunks"] = num_chunks
         status["embedded"] = True
 
-        logger.info(f"Successfully processed {file_path}: ")
+        logger.info(f"Successfully processed {file_path}")
 
     except Exception as e:
         logger.error(f"Error processing {file_path}: {str(e)}")

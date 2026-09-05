@@ -5,7 +5,7 @@ from app.logger import Logger
 logger = Logger.get_logger(__name__)
 
 
-PROCESSED = set()
+processed = set()
 
 def scan_folder():
     """
@@ -33,27 +33,27 @@ def scan_folder():
     failed = 0
     
     for file in pdf_files:
-        if file not in PROCESSED:
+        if file not in processed:
             file_path = os.path.join(DATA_FOLDER, file)
             
             try:
-                logger.info(f"Ingesting: {file}")
+                logger.info(f"Ingesting: {file_path}")
                 status = process_pdf(file_path)
                 results.append(status)
                 
                 if status.get("error"):
-                    logger.error(f"Failed to ingest {file}: {status['error']}")
+                    logger.error(f"Failed to ingest {file_path}: {status['error']}")
                     failed += 1
                 else:
-                    logger.info(f"Successfully ingested {file}: {status['num_chunks']} chunks")
+                    logger.info(f"Successfully ingested {file_path}: {status['num_chunks']} chunks")
                     successful += 1
                 
-                PROCESSED.add(file)
+                processed.add(file)
             
             except Exception as e:
-                logger.error(f"Error processing {file}: {str(e)}")
+                logger.error(f"Error processing {file_path}: {str(e)}")
                 failed += 1
-                PROCESSED.add(file)
+                processed.add(file)
     
     logger.info(f"Ingestion complete: {successful} successful, {failed} failed")
     return results
