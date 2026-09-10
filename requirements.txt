@@ -4,3 +4,8 @@ faiss-cpu>=1.8.0
 numpy>=1.26.0
 python-dotenv>=1.0.0
 openai>=1.68.0
+networkx>=3.0
+spacy>=3.7.0
+# Named entity extraction for the knowledge graph also needs the English model:
+#   python -m spacy download en_core_web_sm
+# It is downloaded on first use if missing.

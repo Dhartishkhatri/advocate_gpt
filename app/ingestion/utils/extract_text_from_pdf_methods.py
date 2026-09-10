@@ -4,7 +4,16 @@ def extract_text_from_pdf_using_pypdf(file_path):
     Examples: merge PDFs, split pages, rotate pages, add password, crop pages, read metadata. 
     The official project describes it as a pure-Python library for splitting, merging, cropping, transforming pages,
     adding passwords, and retrieving text/metadata.
+
+    parameters:
+    -----------
+    file_path (str): The path to the PDF file.
+
+    Returns:
+    -----------
+    str: The extracted text from the PDF file.
     """
+
     from pypdf import PdfReader
     elements = PdfReader(file_path)
     text = ""
@@ -20,6 +29,13 @@ def extract_text_from_pdf_using_unstructured(file_path):
     This method extracts text from the PDF while preserving the structure of the document, including titles, narrative text, 
     and tables. 
     Use this method when you need structured chunks, metadata, and support for multiple file types.
+    parameters:
+    -----------
+    file_path (str): The path to the PDF file.
+
+    Returns:
+    -----------
+    str: The extracted text from the PDF file.
     """
     from unstructured.partition.pdf import partition_pdf
     from unstructured.documents.elements import Title, NarrativeText, Table

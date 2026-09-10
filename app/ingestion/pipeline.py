@@ -5,6 +5,7 @@ import os
 import re
 from collections import Counter
 from typing import List, Dict, Any
+import faiss
 from app import config
 from app.ingestion.embedder import embed_batch
 from app.ingestion.utils.faiss import FAISSStore
@@ -16,6 +17,7 @@ from app.ingestion.utils.extract_text_from_pdf_methods import (
     extract_text_from_pdf_using_tesseract,
     extract_text_from_pdf_using_pdfminer,
 )
+from app.ingestion.utils.knowledge_graph_methods import build_knowledge_graph
 from app.ingestion.utils.chunking_methods import (
     chunk_text,
     chunk_by_words,
@@ -243,7 +245,7 @@ def create_bm25_index(chunks, index_path=None):
     return index
 
 
-def update_bm25_index(chunks, index_path):
+def update_bm25_index(chunks, index_path, commit=True):
     """
     Update an existing BM25 index with new chunks.
     parameters:
@@ -295,7 +297,10 @@ def update_bm25_index(chunks, index_path):
 
     index["average_chunk_length"] = (index["total_chunk_length"] / index["chunk_count"] if index["chunk_count"] else 0.0)
 
-    save_bm25_index(index, index_path)
+    # Pass commit=False when the caller publishes this alongside the vector store.
+    if commit:
+        save_bm25_index(index, index_path)
+
     return index, added_count
 
 
@@ -326,6 +331,38 @@ def save_bm25_index(index, index_path):
     os.replace(temporary_path, index_path)
 
 
+def save_all_indexes(vector_store, bm25_index, knowledge_graph=None):
+    """Save the FAISS store, the BM25 index and the knowledge graph together, or not at all.
+
+    Every file is written as ".tmp" first, so nothing is published until all of
+    them are complete. They are then swapped in the order that keeps each
+    intermediate state usable: extra metadata rows are simply never looked up,
+    extra vectors would break a metadata lookup, and the two chunk-id based
+    indexes go last so they can never point at chunks the vector store does not
+    have yet.
+    """
+
+    Path(config.VECTOR_STORE_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+    json_targets = [
+        (vector_store.metadata, config.METADATA_PATH),
+        (bm25_index, config.BM25_INDEX_PATH),
+    ]
+    replace_order = [config.METADATA_PATH, config.VECTOR_STORE_PATH, config.BM25_INDEX_PATH]
+
+    if knowledge_graph is not None:
+        json_targets.append((knowledge_graph.to_dict(), config.KNOWLEDGE_GRAPH_PATH))
+        replace_order.append(config.KNOWLEDGE_GRAPH_PATH)
+
+    faiss.write_index(vector_store.index, f"{config.VECTOR_STORE_PATH}.tmp")
+    for data, path in json_targets:
+        with open(f"{path}.tmp", "w", encoding="utf-8") as output_file:
+            json.dump(data, output_file, ensure_ascii=False)
+
+    for path in replace_order:
+        os.replace(f"{path}.tmp", path)
+
+
 def ingest_pdf(file_path):
     """
     Full PDF ingestion pipeline:
@@ -333,7 +370,8 @@ def ingest_pdf(file_path):
     2. Chunk text
     3. Embed chunks
     4. Store embeddings in FAISS
-    5. Save FAISS index
+    5. Extend the knowledge graph with the new chunks
+    6. Save FAISS index, BM25 index and knowledge graph
 
     Parameters:
     -----------
@@ -366,14 +404,13 @@ def ingest_pdf(file_path):
 
         bm25_index_path = Path(config.BM25_INDEX_PATH)
 
+        # Build both indexes in memory only, so a later failure leaves disk untouched.
         if bm25_index_path.is_file():
-            _, bm25_added = update_bm25_index(chunks=all_docs,index_path=bm25_index_path)
+            bm25_index, bm25_added = update_bm25_index(chunks=all_docs, index_path=bm25_index_path, commit=False)
         else:
             bm25_index = create_bm25_index(all_docs)
-            save_bm25_index(bm25_index, bm25_index_path)
             bm25_added = bm25_index["chunk_count"]
-            logger.info("Created BM25 index with %d chunks", bm25_added)
-
+        logger.info(f"BM25 index covers {bm25_added} new chunks")
 
         vector_store = FAISSStore.load()
         embeddings = chunk_to_embed(all_docs)
@@ -384,7 +421,21 @@ def ingest_pdf(file_path):
         if vector_store is None:
             vector_store = FAISSStore(dim)
         vector_store.add(embeddings=embeddings, docs=all_docs)
-        vector_store.save()
+
+        knowledge_graph = None
+        if config.BUILD_KNOWLEDGE_GRAPH:
+            try:
+                # commit=False so the graph is published with the other indexes
+                # below rather than written on its own.
+                knowledge_graph = build_knowledge_graph(
+                    all_docs, embeddings=embeddings, store=vector_store, commit=False
+                )
+            except Exception as exc:
+                # The graph is an auxiliary index; losing it must not cost us the
+                # chunks that were successfully embedded.
+                logger.warning(f"Skipping knowledge graph for {file_path}: {exc}")
+
+        save_all_indexes(vector_store, bm25_index, knowledge_graph)
 
         return vector_store,len(all_docs)
 

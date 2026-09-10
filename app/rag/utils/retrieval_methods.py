@@ -5,6 +5,59 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 from app.ingestion.pipeline import tokenize_bm25
 import numpy as np
+import requests
+from app import config
+from app.ingestion.embedder import embed_batch
+
+def hyde_retrieval(query: str, store, k: int = 5, chunk_size: Optional[int] = None, temperature: float = 0):
+    """Generate a hypothetical answer document, then retrieve the chunks closest to it.
+
+    The hypothetical document is written by the configured Ollama model and used as
+    the search text instead of the raw question, so the query and the indexed chunks
+    sit in the same "answer shaped" region of the embedding space.
+    """
+
+
+    chunk_size = chunk_size or config.CHUNK_SIZE
+
+    prompt = (
+        f"Given the question '{query}', generate a hypothetical legal document that "
+        "directly answers this question. The document should be detailed and in-depth. "
+        f"The document size has to be exactly {chunk_size} characters."
+    )
+
+    response = requests.post(
+        f"{config.OLLAMA_BASE_URL}/api/generate",
+        json={
+            "model": config.OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "temperature": temperature,
+        },
+        timeout=config.TIMEOUT,
+    )
+    response.raise_for_status()
+
+    hypothetical_document = response.json().get("response", "").strip()
+    # Fall back to the raw question if the model returned nothing usable.
+    search_text = hypothetical_document or query
+
+    query_vector = embed_batch([search_text])
+    search_k = min(k, store.index.ntotal)
+    if search_k <= 0:
+        return []
+
+    distances, indices = store.index.search(query_vector, search_k)
+
+    return [
+        {
+            **store.metadata[index],
+            "relevance_score": float(1 / (1 + distance)),
+            "hypothetical_document": hypothetical_document,
+        }
+        for distance, index in zip(distances[0], indices[0])
+        if index >= 0
+    ]
 
 
 def hierarchical_retrieval(summary_store, detail_store, query: str,k: int = 5,summary_k: int = 3):
